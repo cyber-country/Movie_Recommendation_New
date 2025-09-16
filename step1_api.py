@@ -1,4 +1,8 @@
-# genergenie_dynamic.py
+# genergenie_dynamic_gdrive.py
+# ------------------------------------------------------------
+# GenerGenie — Dynamic Movie Recommendation with Google Drive Cache
+# ------------------------------------------------------------
+
 import os, json, hashlib
 from pathlib import Path
 
@@ -8,6 +12,7 @@ import streamlit as st
 from sentence_transformers import SentenceTransformer, util
 from dotenv import load_dotenv
 from openai import OpenAI
+import gdown
 
 # --- Load API keys ---
 load_dotenv()
@@ -19,28 +24,50 @@ client = OpenAI(api_key=OPENAI_KEY)
 os.environ["OMP_NUM_THREADS"] = str(os.cpu_count())
 torch.set_num_threads(os.cpu_count())
 
-# --- Config ---
-CSV_PATH = r"C:\Users\santosh\Desktop\python-project\TMDB_movie_dataset_v11.csv"
+# --- Google Drive file IDs ---
+GDRIVE_FILES = {
+    "csv": "1taVn3jeu9R5g4RkYJuuthdjANMZ_29dh",
+    "embeddings_pt": "1kJ1ThTtPqkVkBPVTgtm7D7jMvAtPGKDD",
+    "ids_json": "1rc0niTdB3RT0YlTRdQehE32U23NV47PW"
+}
+
+# --- Cache setup ---
 CACHE_DIR = Path("cache")
 CACHE_DIR.mkdir(exist_ok=True)
 
-csv_sig = hashlib.md5(CSV_PATH.encode()).hexdigest()[:8]
-EMB_FILE = CACHE_DIR / f"embeddings_{csv_sig}.pt"
-IDS_FILE = CACHE_DIR / f"ids_{csv_sig}.json"
+CSV_PATH = CACHE_DIR / "TMDB_movie_dataset_v11.csv"
+EMB_FILE = CACHE_DIR / "embeddings_dd625368.pt"
+IDS_FILE = CACHE_DIR / "ids_dd625368.json"
 TMDB_IMAGE = "https://image.tmdb.org/t/p/w500"
+
+# --- Helper to download from Google Drive ---
+def download_from_gdrive(file_id, out_path):
+    if not os.path.exists(out_path):
+        url = f"https://drive.google.com/uc?id={file_id}"
+        print(f"Downloading {out_path} ...")
+        gdown.download(url, out_path, quiet=False)
+    else:
+        print(f"{out_path} already exists, skipping download.")
+
+# --- Download files if missing ---
+download_from_gdrive(GDRIVE_FILES["csv"], CSV_PATH)
+download_from_gdrive(GDRIVE_FILES["embeddings_pt"], EMB_FILE)
+download_from_gdrive(GDRIVE_FILES["ids_json"], IDS_FILE)
 
 # --- Load model ---
 @st.cache_resource(show_spinner=False)
 def load_model():
     return SentenceTransformer("all-MiniLM-L6-v2")
+
 embedder = load_model()
 
-# --- Load embeddings and dataset ---
+# --- Load embeddings + dataset ---
 @st.cache_resource(show_spinner=True)
 def load_embeddings_and_ids():
     if not EMB_FILE.exists() or not IDS_FILE.exists():
-        st.error("❌ No embeddings found. Run precompute_embeddings.py first.")
+        st.error("❌ No embeddings found.")
         return torch.empty((0,384)), [], pd.DataFrame()
+
     df = pd.read_csv(CSV_PATH, low_memory=False)
     df["title"] = df["title"].fillna("").astype(str)
     df["overview"] = df.get("overview", "").fillna("").astype(str)
@@ -48,9 +75,11 @@ def load_embeddings_and_ids():
     df["adult"] = df.get("adult", False).fillna(False).astype(bool)
     df["popularity"] = df.get("popularity", 0).fillna(0)
     df["genres"] = df.get("genres", "").fillna("").astype(str)
+
     embeddings = torch.load(EMB_FILE, map_location="cpu")
     with open(IDS_FILE, "r", encoding="utf-8") as f:
         ids = json.load(f)
+
     return embeddings, ids, df
 
 embeddings, ids, df = load_embeddings_and_ids()
@@ -97,7 +126,7 @@ def gpt_suggest_movies(query):
     except:
         return []
 
-# --- Search function with dynamic pool & adaptive threshold ---
+# --- Search function ---
 def search_movies(query, top_k=50, hide_adult=True, genre_filter=None, base_candidate_pool=500, max_candidate_pool=5000, threshold=0.37):
     if embeddings.numel() == 0 or len(ids) == 0:
         return []
@@ -133,27 +162,25 @@ def search_movies(query, top_k=50, hide_adult=True, genre_filter=None, base_cand
         norm_pop = torch.tensor([p/max_pop for p in pop_values])
 
         final_scores = 0.9 * sims + 0.1 * norm_pop
-
         query_lower = query.lower()
         keyword_bonus = torch.tensor([0.05 if query_lower in r.title.lower() or query_lower in r.overview.lower() else 0.0 for r in rows])
-        final_scores = final_scores + keyword_bonus
+        final_scores += keyword_bonus
 
         topk_vals, topk_idx = torch.topk(final_scores, k=min(top_k, len(rows)))
         results = [(rows[i], float(topk_vals[j])) for j, i in enumerate(topk_idx)]
         results = [(r, s) for r, s in results if s >= threshold]
 
         final_results = gpt_rerank(results, query, top_n=top_k)
-        if len(final_results) >= 10:  # enough results found
+        if len(final_results) >= 10:
             break
-        candidate_pool += 500   # expand candidate pool
-        threshold *= 0.95      # slightly lower threshold if too few matches
+        candidate_pool += 500
+        threshold *= 0.95
 
     return final_results
 
 # --- Streamlit UI ---
 st.set_page_config(page_title="🌟 GenerGenie 🌟", layout="wide")
 
-# Dark Netflix theme
 st.markdown("""
 <style>
 body, .stApp { background-color: #000; color: #f5f5f5; }
