@@ -5,3 +5,5 @@ cache/embeddings_*.pt filter=lfs diff=lfs merge=lfs -text
 *.pt filter=lfs diff=lfs merge=lfs -text
 *.json filter=lfs diff=lfs merge=lfs -text
 cache/*.pt filter=lfs diff=lfs merge=lfs -text
+cache/embeddings_dd625368.pt filter=lfs diff=lfs merge=lfs -text
+cache/ids_dd625368.json filter=lfs diff=lfs merge=lfs -text
