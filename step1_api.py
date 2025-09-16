@@ -3,21 +3,19 @@
 # GenerGenie — Dynamic Movie Recommendation with Google Drive Cache
 # ------------------------------------------------------------
 
-import os, json, hashlib
+import os, json
 from pathlib import Path
 
 import torch
 import pandas as pd
 import streamlit as st
 from sentence_transformers import SentenceTransformer, util
-from dotenv import load_dotenv
 from openai import OpenAI
 import gdown
 
-# --- Load API keys ---
-load_dotenv()
-TMDB_KEY = os.getenv("TMDB_API_KEY")
-OPENAI_KEY = os.getenv("OPENAI_API_KEY")
+# --- Load API keys from Streamlit secrets ---
+TMDB_KEY = st.secrets.get("TMDB_API_KEY")
+OPENAI_KEY = st.secrets.get("OPENAI_API_KEY")
 client = OpenAI(api_key=OPENAI_KEY)
 
 # --- CPU optimization ---
@@ -41,11 +39,11 @@ IDS_FILE = CACHE_DIR / "ids_dd625368.json"
 TMDB_IMAGE = "https://image.tmdb.org/t/p/w500"
 
 # --- Helper to download from Google Drive ---
-def download_from_gdrive(file_id, out_path):
-    if not os.path.exists(out_path):
+def download_from_gdrive(file_id, out_path: Path):
+    if not out_path.exists():
         url = f"https://drive.google.com/uc?id={file_id}"
         print(f"Downloading {out_path} ...")
-        gdown.download(url, out_path, quiet=False)
+        gdown.download(url, str(out_path), quiet=False)
     else:
         print(f"{out_path} already exists, skipping download.")
 
@@ -83,7 +81,7 @@ def load_embeddings_and_ids():
     return embeddings, ids, df
 
 embeddings, ids, df = load_embeddings_and_ids()
-id_to_idx = {ids[i]: i for i in range(len(ids))}
+id_to_idx = {str(ids[i]): i for i in range(len(ids))}
 
 # --- GPT helpers ---
 def expand_query_with_gpt(query):
@@ -261,4 +259,4 @@ elif query:
         if visible_count < len(results):
             if st.button("Load More"):
                 st.session_state.visible_count += 10
-                st.rerun()
+                st.experimental_rerun()
