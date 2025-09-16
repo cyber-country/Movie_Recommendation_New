@@ -1,7 +1,7 @@
-streamlit
-pandas
+flask
 torch
+pandas
 sentence-transformers
-gdown
-python-dotenv
 openai
+gdown
+gunicorn
